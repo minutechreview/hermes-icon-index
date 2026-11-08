@@ -636,7 +636,7 @@ function loopSrc(icon) {
 // a SandboxedFrame, so its three.js code never runs in the app itself.
 function viewerSrc(icon, color = '', download = false) {
   const tint = HEX.test(color) && color !== 'ff6200' ? `&color=${color}` : ''
-  return `${VIEWER_URL}#id=${icon.id}${tint}${download ? '&dl=1' : ''}`
+  return `${VIEWER_URL}#id=${icon.id}${tint}${download ? '&dl=1' : ''}&dark=1`
 }
 
 function matches(icon, category, words) {
