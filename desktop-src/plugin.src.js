@@ -1,0 +1,257 @@
+// Icon Index for Hermes Desktop: a pane of spinning 3D icons, plus an inline chat card the agent
+// can show with ::icon-index{id="rocket"}. Source of desktop/plugin.js; regenerate with
+// `node scripts/build-desktop.mjs`. Every 3D view is a SandboxedFrame (opaque origin), so the
+// model viewer script never runs in the app itself. Everything interactive is plain React.
+import * as sdk from '@hermes/plugin-sdk'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { jsx, jsxs } from 'react/jsx-runtime'
+
+const { Button, host, Input, SandboxedFrame } = sdk
+const ICONS = __ICONS__
+const ASSET_BASE = __ASSET_BASE__
+const VIEWER_URL = __VIEWER_URL__
+const PRESETS = [
+  ['Orange', 'ff6200'], ['Blue', '3b82f6'], ['Purple', '8b5cf6'], ['Green', '22c55e'],
+  ['Pink', 'ec4899'], ['Red', 'ef4444'], ['Teal', '14b8a6'], ['Yellow', 'facc15']
+]
+const HEX = /^[0-9a-f]{6}$/
+const CATEGORIES = ['All', 'Tech', 'Money', 'Social', 'Work']
+const ID = /^[a-z0-9-]{1,40}$/
+
+const TEXT = {
+  primary: 'var(--ui-text-primary)',
+  secondary: 'var(--ui-text-secondary)',
+  tertiary: 'var(--ui-text-tertiary)',
+  line: 'var(--ui-stroke-secondary)'
+}
+
+const fileUrl = (icon, name) => `${ASSET_BASE}/icons/${icon.id}/${name}`
+
+function frameDoc(body) {
+  const css = 'html,body{margin:0;height:100%;overflow:hidden;background:transparent}' +
+    'video,model-viewer{width:100%;height:100%;display:block;object-fit:cover;background:transparent}'
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(
+    `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`)
+}
+
+const loopCache = new Map()
+function loopSrc(icon) {
+  if (!loopCache.has(icon.id)) {
+    loopCache.set(icon.id, frameDoc(
+      `<video autoplay muted loop playsinline poster="${fileUrl(icon, 'icon.png')}" src="${fileUrl(icon, 'turntable.mp4')}"></video>`))
+  }
+  return loopCache.get(icon.id)
+}
+
+// Interactive viewer page (drag to spin, recolour, download), hosted with the icon files and shown in
+// a SandboxedFrame, so its three.js code never runs in the app itself.
+function viewerSrc(icon, color = '', download = false) {
+  const tint = HEX.test(color) && color !== 'ff6200' ? `&color=${color}` : ''
+  return `${VIEWER_URL}#id=${icon.id}${tint}${download ? '&dl=1' : ''}`
+}
+
+function matches(icon, category, words) {
+  if (category !== 'All' && icon.category !== category) return false
+  const hay = `${icon.title} ${icon.category} ${icon.description} ${icon.tags.join(' ')}`.toLowerCase()
+  return words.every(word => hay.includes(word))
+}
+
+async function copy(ctx, text, message) {
+  const ok = await ctx.os.writeClipboard(text)
+  host.notify(ok ? { kind: 'success', message } : { kind: 'error', message: 'Could not copy to the clipboard.' })
+}
+
+async function insertOrCopy(ctx, text) {
+  if (await host.composer.insertText(null, text, { mode: 'block' })) return host.composer.focus(null)
+  await copy(ctx, text, 'No chat is open here, so the text was copied instead.')
+}
+
+function embedHtml(icon, color) {
+  return `<iframe src="${viewerSrc(icon, color)}" title="3D ${icon.title.toLowerCase()} icon" ` +
+    'width="320" height="320" style="border:0;background:transparent" loading="lazy"></iframe>'
+}
+
+function Frame({ src, title, height, lazy, sandbox }) {
+  const box = useRef(null)
+  const [visible, setVisible] = useState(!lazy)
+  useEffect(() => {
+    if (!lazy || !box.current) return undefined
+    const observer = new IntersectionObserver(items => setVisible(items.some(item => item.isIntersecting)), { rootMargin: '200px' })
+    observer.observe(box.current)
+    return () => observer.disconnect()
+  }, [lazy])
+  return jsx('div', {
+    ref: box,
+    style: { aspectRatio: height ? undefined : '1', height, borderRadius: 8, overflow: 'hidden', width: '100%' },
+    children: visible ? jsx(SandboxedFrame, { src, title, sandbox, style: { border: 0, display: 'block', height: '100%', width: '100%' } }) : null
+  })
+}
+
+function Tile({ icon, onOpen }) {
+  return jsxs('button', {
+    type: 'button',
+    onClick: () => onOpen(icon.id),
+    'aria-label': `Open ${icon.title}`,
+    style: { background: 'transparent', border: 0, color: 'inherit', cursor: 'pointer', padding: 0, textAlign: 'left' },
+    children: [
+      jsx('div', { style: { pointerEvents: 'none' }, children: jsx(Frame, { src: loopSrc(icon), title: `${icon.title} preview`, lazy: true }) }),
+      jsx('div', { style: { color: TEXT.primary, fontSize: 12, fontWeight: 600, marginTop: 4 }, children: icon.title })
+    ]
+  })
+}
+
+function Label({ children }) {
+  return jsx('div', { style: { color: TEXT.tertiary, fontSize: 10, letterSpacing: '0.08em', marginTop: 14, textTransform: 'uppercase' }, children })
+}
+
+function Swatch({ hex, label, active, onPick }) {
+  return jsx('button', {
+    type: 'button',
+    title: label,
+    'aria-label': `${label} accent`,
+    'aria-pressed': active,
+    onClick: () => onPick(hex),
+    style: {
+      background: `#${hex}`, border: active ? '2px solid var(--ui-text-primary)' : `1px solid ${TEXT.line}`,
+      borderRadius: 999, cursor: 'pointer', height: 22, padding: 0, width: 22
+    }
+  })
+}
+
+function ColorPicker({ color, onPick }) {
+  return jsxs('div', {
+    style: { alignItems: 'center', display: 'flex', flexWrap: 'wrap', gap: 6 },
+    children: [
+      ...PRESETS.map(([label, hex]) => jsx(Swatch, { hex, label, active: color === hex, onPick }, hex)),
+      jsx('input', {
+        type: 'color',
+        value: `#${color}`,
+        'aria-label': 'Any colour',
+        title: 'Any colour',
+        onChange: event => onPick(event.target.value.slice(1).toLowerCase()),
+        style: { background: 'transparent', border: 0, cursor: 'pointer', height: 24, padding: 0, width: 28 }
+      })
+    ]
+  })
+}
+
+function colorName(color) {
+  const preset = PRESETS.find(([, hex]) => hex === color)
+  return preset ? preset[0].toLowerCase() : `#${color}`
+}
+
+function Detail({ ctx, icon, onBack }) {
+  const [color, setColor] = useState('ff6200')
+  const tinted = color !== 'ff6200'
+  const link = (label, name) => jsx(Button, {
+    variant: 'outline', size: 'sm', onClick: () => ctx.os.openExternal(fileUrl(icon, name)), children: label
+  }, name)
+  const ask = `Add the 3D ${icon.title.toLowerCase()} icon from Icon Index (id: ${icon.id})` +
+    `${tinted ? ` in ${colorName(color)}` : ''} to `
+  return jsxs('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: 4, padding: 12 },
+    children: [
+      jsx(Button, { variant: 'ghost', size: 'sm', onClick: onBack, style: { alignSelf: 'flex-start' }, children: '← All icons' }),
+      jsx(Frame, { src: viewerSrc(icon, color, true), title: `${icon.title} 3D viewer`, lazy: false, sandbox: 'allow-scripts allow-downloads' }),
+      jsx('div', { style: { color: TEXT.tertiary, fontSize: 11, textAlign: 'center' }, children: 'Drag to spin · Download GLB saves this colour' }),
+      jsx(Label, { children: 'Accent colour' }),
+      jsx(ColorPicker, { color, onPick: setColor }),
+      jsx(Label, { children: icon.category }),
+      jsx('div', { style: { color: TEXT.primary, fontSize: 18, fontWeight: 600 }, children: icon.title }),
+      jsx('div', { style: { color: TEXT.secondary, fontSize: 12, lineHeight: 1.5 }, children: icon.description }),
+      jsxs('div', {
+        style: { display: 'grid', gap: 6, marginTop: 14 },
+        children: [
+          jsx(Button, { onClick: () => insertOrCopy(ctx, ask), children: 'Ask the agent to add this' }),
+          jsx(Button, { variant: 'secondary', onClick: () => copy(ctx, embedHtml(icon, color), 'Embed code copied.'), children: 'Copy embed code' })
+        ]
+      }),
+      jsx(Label, { children: 'Download (orange original)' }),
+      jsx('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: 6 },
+        children: [link('GLB (web)', 'model.glb'), link('GLB (full)', 'model-full.glb'), link('PNG', 'icon.png'), link('MP4 loop', 'turntable.mp4')]
+      })
+    ]
+  })
+}
+
+function Gallery({ onOpen }) {
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('All')
+  const list = useMemo(() => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean)
+    return ICONS.filter(icon => matches(icon, category, words))
+  }, [query, category])
+  return jsxs('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: 8, padding: 12 },
+    children: [
+      jsxs('div', {
+        style: { alignItems: 'baseline', display: 'flex', justifyContent: 'space-between' },
+        children: [
+          jsx('div', { style: { color: TEXT.primary, fontSize: 14, fontWeight: 650 }, children: 'Icon Index' }),
+          jsx('div', { style: { color: TEXT.tertiary, fontSize: 11 }, children: `${list.length} 3D icons` })
+        ]
+      }),
+      jsx(Input, { type: 'search', value: query, placeholder: 'Search: security, money, launch…', 'aria-label': 'Search icons', onChange: event => setQuery(event.target.value) }),
+      jsx('div', {
+        style: { display: 'flex', flexWrap: 'wrap', gap: 4 },
+        children: CATEGORIES.map(name => jsx(Button, {
+          variant: name === category ? 'default' : 'chip', size: 'xs', 'aria-pressed': name === category, onClick: () => setCategory(name), children: name
+        }, name))
+      }),
+      list.length
+        ? jsx('div', {
+            style: { display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))', marginTop: 4 },
+            children: list.map(icon => jsx(Tile, { icon, onOpen }, icon.id))
+          })
+        : jsx('div', { style: { color: TEXT.tertiary, fontSize: 12, padding: '24px 0' }, children: 'No icons match. Try another word.' })
+    ]
+  })
+}
+
+function IconIndexPane({ ctx }) {
+  const [openId, setOpenId] = useState(null)
+  const icon = openId ? ICONS.find(item => item.id === openId) : null
+  return jsxs('div', {
+    style: { height: '100%', overflowY: 'auto' },
+    children: [
+      jsx('div', { style: { display: icon ? 'none' : 'block' }, children: jsx(Gallery, { onOpen: setOpenId }) }),
+      icon ? jsx(Detail, { ctx, icon, onBack: () => setOpenId(null) }) : null
+    ]
+  })
+}
+
+// Inline chat card for ::icon-index{id="rocket" color="3b82f6"}. Attributes are untrusted model output.
+function ChatCard({ id, color }) {
+  const icon = typeof id === 'string' && ID.test(id) ? ICONS.find(item => item.id === id) : null
+  if (!icon) return null
+  const tint = typeof color === 'string' && HEX.test(color.replace('#', '').toLowerCase()) ? color.replace('#', '').toLowerCase() : ''
+  return jsxs('div', {
+    style: { border: `1px solid ${TEXT.line}`, borderRadius: 10, maxWidth: 260, padding: 8 },
+    children: [
+      jsx(Frame, { src: viewerSrc(icon, tint), title: `${icon.title} 3D viewer`, height: 220, lazy: false }),
+      jsx('div', { style: { color: TEXT.primary, fontSize: 12, fontWeight: 600, marginTop: 6 }, children: `${icon.title} · Icon Index` })
+    ]
+  })
+}
+
+export default {
+  id: 'icon-index',
+  name: 'Icon Index',
+  register(ctx) {
+    ctx.register({
+      id: 'gallery',
+      area: 'panes',
+      title: 'Icon Index',
+      data: { placement: 'right', width: '380px' },
+      render: () => jsx(IconIndexPane, { ctx })
+    })
+    if (sdk.TRANSCRIPT_DIRECTIVE_AREA) {
+      ctx.register({
+        id: 'chat-card',
+        area: sdk.TRANSCRIPT_DIRECTIVE_AREA,
+        data: { name: 'icon-index', render: ({ attrs }) => jsx(ChatCard, { id: attrs && attrs.id, color: attrs && attrs.color }) }
+      })
+    }
+  }
+}

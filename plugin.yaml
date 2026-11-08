@@ -1,0 +1,17 @@
+name: icon-index
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+description: >-
+  Icon Index for Hermes: a free library of matching 3D icons. Browse them spinning in a Desktop pane,
+  recolour them, and let the agent find an icon, give embed code, or save it into your project.
+author: Rayan Abdul Cader
+license: MIT
+homepage: https://github.com/minutechreview/hermes-icon-index
+requires_hermes: ">=0.22.5"
+tags: [3d, icons, design, web, assets]
+provides_tools:
+  - icon_search
+  - icon_get
+  - icon_save
+provides_hooks: []
