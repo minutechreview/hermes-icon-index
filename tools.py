@@ -134,6 +134,7 @@ def _download(url: str, dest: Path) -> int:
     fd, tmp = tempfile.mkstemp(dir=dest.parent, prefix=".icon-index-")
     with os.fdopen(fd, "wb") as handle:
         handle.write(body)
+    os.chmod(tmp, 0o644)  # mkstemp makes 0600; a web server must be able to read the file
     try:
         os.link(tmp, dest)  # fails if dest appeared meanwhile, so nothing is ever overwritten
     finally:
